@@ -92,6 +92,18 @@ Implications for this design:
 2. Conversational **memory only grows when you talk to the LLM**. Commands routed around it don't feed
    personality development → keep the LLM in the loop for *chat* (the hybrid) if long-term personality matters.
 
+## Scaffold status (2026-07-17)
+Built: `voice_direct.py` + `run-direct.command`. Tested WITHOUT the dog:
+- command table matching (synonyms work; non-commands fall through) ✅
+- LLM-as-NLU mapper against live local Ollama ✅ — fast (0.2-0.6s, constrained reply), compound commands
+  work ("take a seat and give me your paw" → ["sit","shake"]), non-commands → [].
+- sounddevice installed; default mic detected = **Blue Yeti** (great — far better than the robot mic).
+Not yet tested (need dog on + a spoken utterance): the mic→wake→Whisper loop end-to-end, and the robot
+REST calls (`load_actions`/`resolve`/`play`). The command→action files auto-resolve from the live
+`/action/list` at startup, so exact vendor names fill themselves in.
+Refinement noted: the LLM is conservative on vague/playful requests ("do a trick", "greet me" → []);
+tune the system prompt to pick a fun action/sequence for those if desired.
+
 ## Open items / to test when Sirius is on
 - **Audio-injection test**: prove a Mac-side mic → wake → Whisper → REST action makes the dog act (no robot mic).
 - `GET /api/v1/action/list` → pin exact action names; decide per-command endpoint (action/play vs gait vs transform).
