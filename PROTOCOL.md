@@ -31,5 +31,8 @@ Header bytes:
 
 ## Shim TODO (repo status)
 - [x] TLS interception + redirect proven; full client protocol captured (`capture_server.py`)
-- [ ] Response side: parse config+audio (gunzip, accumulate to flags=0x2) → **Whisper** → send SERVER_FULL result
+- [x] Response side: parse config+audio → **Whisper** → SERVER_FULL result. WORKS (robot logs 服务端首个结果).
+- [ ] **STREAMING**: shim is batch (transcribes at end-of-utterance) → result arrives too late, robot turn times
+      out (`静音超时→不进L3`). Next: transcribe growing buffer incrementally + stream partial results (definite=false),
+      final on flags=0x2. This is what makes the action fire reliably.
 - [ ] `start.command` runner (venv + faster-whisper) on the Mac (M2 Max, Metal)
