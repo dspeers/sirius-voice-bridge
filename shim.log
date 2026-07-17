@@ -1,38 +1,18 @@
-21:25:25 loading Whisper 'base.en'…
-21:25:25 Whisper ready.
-21:25:25 SAUC shim on wss://0.0.0.0:8443  (Whisper=base.en)
-21:25:40 connect ('192.168.4.134', 43494) /api/v3/sauc/bigmodel_async
-21:25:57   utterance 15.6s -> "Because those men and women are not here, they can't hear anything.  Because those men and women are not here.  They can't hear anything."
-21:26:02 connect ('192.168.4.134', 43496) /api/v3/sauc/bigmodel_async
-21:26:19   utterance 15.6s -> "OK.  That's it.  We'll go.  You can take the  hand.  So.  You know.  So.  Hey, Siri.  Oh, I can't see.  I can see.  Yeah, I can see.  Okay.  I'm going to take my hand.  I'm going to take my hand.  Okay.  So.  So.  So.  So.  So.  So.  So."
-21:26:20 connect ('192.168.4.134', 43498) /api/v3/sauc/bigmodel_async
-21:26:40   utterance 15.2s -> "Okay.  Sir?  You just put it on.  I'll just put it on.  You're not going to be worried.  Hey, darling!  Yes.  What?  You're going to be worried.  You're going to be worried.  Okay.  Okay.  Okay.  Okay.  That's it.  Okay.  Okay.  Okay.  You're going to be worried.  Okay.  Okay.  Okay.  Okay.  Okay.  Okay."
-21:26:43 connect ('192.168.4.134', 43500) /api/v3/sauc/bigmodel_async
-21:26:59   utterance 15.1s -> "Why does it get on it?  You don't want to get my help.  You're like, what?  I don't mean to get it. I'm the only person who wants to go out the night.  You don't want to go out there. You can't get it."
-21:27:06 connect ('192.168.4.134', 43506) /api/v3/sauc/bigmodel_async
-21:27:21   utterance 15.2s -> "I don't know what that's supposed to be.  You can't have a chance to make it.  Nothing between the public and the public."
-21:27:28 connect ('192.168.4.134', 43512) /api/v3/sauc/bigmodel_async
-21:27:49   utterance 15.1s -> "it's okay for everybody.  You know what I saw in the beginning.  I saw the beginning.  You're listening to him.  No, he's listening to not.  He's listening to him.  But what was it?  I think it's about not listening.  But we have two hands."
-21:27:49 connect ('192.168.4.134', 43514) /api/v3/sauc/bigmodel_async
-21:28:08   utterance 15.3s -> '...'
-21:28:13 connect ('192.168.4.134', 43516) /api/v3/sauc/bigmodel_async
-21:28:19   utterance 1.8s -> ''
-21:28:21 connect ('192.168.4.134', 43518) /api/v3/sauc/bigmodel_async
-21:28:31   utterance 8.4s -> 'You serious?  Sit.'
-21:28:32 connect ('192.168.4.134', 43520) /api/v3/sauc/bigmodel_async
-21:28:37   utterance 3.7s -> 'Two.'
-21:28:38 connect ('192.168.4.134', 43522) /api/v3/sauc/bigmodel_async
-21:28:54   utterance 15.0s -> "He's serious, he's sick.  He's sick, dog, he's sick.  Yeah, he's a boss, you mean?"
-21:28:57 connect ('192.168.4.134', 43524) /api/v3/sauc/bigmodel_async
-21:29:14   utterance 15.5s -> 'I remember when you were a little bit like an angel,  I was just starting to realize,  this is what we did in this.  And rather than it, I remember you picked up and you said,  this is your, this is your, this is your,  this is your, this is your, this is your, this is your.'
-21:29:14 connect ('192.168.4.134', 43526) /api/v3/sauc/bigmodel_async
-21:29:37   utterance 15.1s -> "It's a good feeling.  I'm just don't get convinced.  I just walk in the Wymanas.  You know.  It's a great feeling.  I'm just going to take a picture.  There won't be anything that would be great.  That's what I'm going to do.  That's pretty easy.  The body.  The body.  And the body you do.  And the body.  And the body.  And the body.  So, the body is, things use not to do.  And the body can't be turned on by the body."
-21:29:40 connect ('192.168.4.134', 43528) /api/v3/sauc/bigmodel_async
-21:30:02   utterance 15.3s -> 'on  the'
-21:30:02 connect ('192.168.4.134', 43530) /api/v3/sauc/bigmodel_async
-21:30:20   utterance 15.2s -> ''
-21:30:24 connect ('192.168.4.134', 43532) /api/v3/sauc/bigmodel_async
-21:30:45   utterance 15.6s -> "Not something good.  This is a good thing you can't.  This is a good thing I can use.  This is a good thing you can use.  Support me.  You want me to change the way it's...  The"
-21:30:45 connect ('192.168.4.134', 43534) /api/v3/sauc/bigmodel_async
-21:31:05   utterance 15.3s -> 'Thank you.'
-21:31:08 connect ('192.168.4.134', 43536) /api/v3/sauc/bigmodel_async
+21:43:53 loading Whisper 'small.en'…
+21:43:53 Whisper ready.
+21:43:53 SAUC shim on wss://0.0.0.0:8443  (Whisper=small.en, VAD=3, silence=600ms)
+21:43:57 connect ('192.168.4.134', 43638) /api/v3/sauc/bigmodel_async
+21:44:08   phrase 3.2s -> "It's just a thing you really need to know very, very quickly."
+21:44:08   phrase 0.8s -> (silence, skipped)
+21:44:14   phrase 3.4s -> "So watch for use, you'll never be single again."
+21:44:15   phrase 1.7s -> 'and yellow virgin.'
+21:44:22 connect ('192.168.4.134', 43644) /api/v3/sauc/bigmodel_async
+21:44:28   phrase 3.2s -> 'as their unique place in the system.'
+21:44:34 connect ('192.168.4.134', 43650) /api/v3/sauc/bigmodel_async
+21:44:43   phrase 3.3s -> "and this is really what's going to be paid in this first month."
+21:44:44   phrase 4.0s -> 'All these words start again for the living of the Lord.'
+21:44:51 connect ('192.168.4.134', 43656) /api/v3/sauc/bigmodel_async
+21:44:54   phrase 1.7s -> (silence, skipped)
+21:45:03   phrase 6.5s -> 'All I can see is that, oh, this is 18 and B3 jump tape.  Hey, this is for you, babe.'
+21:45:21 connect ('192.168.4.134', 43662) /api/v3/sauc/bigmodel_async
+21:45:28   phrase 6.5s -> "Like it's a difference between people making money when you're making thousands of dollars."
