@@ -29,6 +29,18 @@ PREROLL_MS = 200                                   # keep a little audio before 
 ENERGY_THRESH = int(os.environ.get("ENERGY_THRESH", "600")) # RMS gate: only close, direct speech counts
 MAX_PHRASE_MS = int(os.environ.get("MAX_PHRASE_MS", "6000"))# force-cut a phrase that runs this long
 
+# Wake-word front-end (openWakeWord). When on, Whisper only runs on the ~2s AFTER the wake word
+# fires — so a roomful of chatter never reaches the brain, and anyone can address the dog by name.
+# "hey_jarvis" is a stock model (no training, no cloud) chosen to not collide with Siri/Alexa.
+USE_WAKE = os.environ.get("WAKE", "1") != "0"
+WAKE_MODEL_NAME = os.environ.get("WAKE_MODEL", "hey_jarvis")
+WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.5"))
+CMD_WINDOW_MS = int(os.environ.get("CMD_WINDOW_MS", "3500"))   # max audio captured after a wake
+CMD_LEAD_MS = int(os.environ.get("CMD_LEAD_MS", "1500"))       # grace for command to start after wake
+CMD_PREROLL_MS = int(os.environ.get("CMD_PREROLL_MS", "1000")) # audio kept before the wake fires (fire is
+                                                               # late, so the command onset lands here)
+OWW_FRAME = 1280                                               # 80ms @16k — oww's native chunk size
+
 def rms(frame: bytes) -> float:
     a = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
     return float(np.sqrt(np.mean(a * a))) if len(a) else 0.0
@@ -67,6 +79,13 @@ def ts(): return time.strftime("%H:%M:%S")
 print(f"{ts()} loading Whisper '{WHISPER_MODEL}'…", flush=True)
 MODEL = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 print(f"{ts()} Whisper ready.", flush=True)
+
+OWW = None
+if USE_WAKE:
+    print(f"{ts()} loading wake model '{WAKE_MODEL_NAME}'…", flush=True)
+    from openwakeword.model import Model as OWWModel
+    OWW = OWWModel(wakeword_models=[WAKE_MODEL_NAME], inference_framework="onnx")
+    print(f"{ts()} wake model ready.", flush=True)
 
 def parse(data: bytes):
     """Return (msg_type, flags, serialization, compression, payload_bytes)."""
@@ -171,42 +190,139 @@ class Utt:
             return blob
         return None
 
+class WakeConn:
+    """Per-connection wake→command state machine. Runs openWakeWord continuously on the stream;
+    once the wake word fires, captures the following speech (VAD-delimited) as the command."""
+    def __init__(self):
+        self.owwbuf = np.zeros(0, dtype=np.int16)   # samples pending an 80ms oww frame
+        self.preroll = bytearray()                   # rolling recent audio while listening for wake
+        self.capturing = False                       # False = listening for wake; True = grabbing command
+        self.cmd = bytearray()                       # command audio captured after wake
+        self.framebuf = bytearray()                  # bytes pending a 20ms VAD frame
+        self.had_speech = False
+        self.silence_ms = 0
+        self.elapsed_ms = 0
+        self.vad = webrtcvad.Vad(VAD_AGGR)
+        if OWW is not None:
+            OWW.reset()
+
+    def feed_wake(self, payload: bytes) -> float:
+        """Feed audio to the wake model; keep a rolling pre-roll; return peak score this chunk."""
+        self.preroll += payload                      # pre-roll = last CMD_PREROLL_MS of audio
+        pre_max = RATE * 2 * CMD_PREROLL_MS // 1000
+        if len(self.preroll) > pre_max:
+            del self.preroll[:len(self.preroll) - pre_max]
+        self.owwbuf = np.concatenate([self.owwbuf, np.frombuffer(payload, dtype=np.int16)])
+        peak = 0.0
+        while len(self.owwbuf) >= OWW_FRAME:
+            frame = self.owwbuf[:OWW_FRAME]; self.owwbuf = self.owwbuf[OWW_FRAME:]
+            peak = max(peak, OWW.predict(frame).get(WAKE_MODEL_NAME, 0.0))
+        return peak
+
+    def start_capture(self):
+        self.capturing = True
+        self.cmd = bytearray(self.preroll)           # seed with pre-roll: late wake-fire won't clip onset
+        self.framebuf = bytearray()
+        self.had_speech = False; self.silence_ms = 0; self.elapsed_ms = 0
+        self.owwbuf = np.zeros(0, dtype=np.int16)
+
+    def feed_cmd(self, payload):
+        """Accumulate post-wake audio; return finished command PCM when the phrase ends, else None."""
+        self.cmd += payload
+        self.framebuf += payload
+        while len(self.framebuf) >= FRAME_BYTES:
+            frame = bytes(self.framebuf[:FRAME_BYTES]); del self.framebuf[:FRAME_BYTES]
+            self.elapsed_ms += FRAME_MS
+            sp = False
+            try: sp = self.vad.is_speech(frame, RATE) and rms(frame) >= ENERGY_THRESH
+            except Exception: pass
+            if sp:
+                self.had_speech = True; self.silence_ms = 0
+            elif self.had_speech:
+                self.silence_ms += FRAME_MS
+            done = (self.had_speech and self.silence_ms >= SILENCE_END_MS) \
+                or self.elapsed_ms >= CMD_WINDOW_MS \
+                or (not self.had_speech and self.elapsed_ms >= CMD_LEAD_MS)  # nobody spoke → false wake
+            if done:
+                return bytes(self.cmd)
+        return None
+
+async def handler_wake(ws, loop):
+    """Wake-word front-end: 'Hey Jarvis' opens a command window; Whisper runs only on that."""
+    c = WakeConn()
+    async def finish():
+        # Wake already confirmed intent — transcribe whatever we captured (pre-roll + command)
+        # and decide by whether Whisper found words, not by our own VAD.
+        text = await loop.run_in_executor(None, transcribe, bytes(c.cmd))
+        if text:
+            print(f"{ts()}   ==> COMMAND {text!r}", flush=True)
+            await ws.send(server_full(text))
+        else:
+            print(f"{ts()}   (false wake — no intelligible command)", flush=True)
+        c.capturing = False
+        if OWW is not None: OWW.reset()
+    async for msg in ws:
+        if not isinstance(msg, bytes) or len(msg) < 8:
+            continue
+        mtype, flags, ser, comp, payload = parse(msg)
+        if mtype == 1:                                      # config → new turn
+            c = WakeConn()
+        elif mtype == 2:
+            if not c.capturing:
+                score = c.feed_wake(payload)
+                if score >= WAKE_THRESHOLD:
+                    print(f"{ts()} WAKE '{WAKE_MODEL_NAME}' (score {score:.2f}) — listening for command", flush=True)
+                    c.start_capture()
+            else:
+                done = c.feed_cmd(payload)
+                if done is None and flags & 0x2:            # robot ended the turn mid-capture
+                    done = bytes(c.cmd)
+                if done is not None:
+                    await finish()
+
 async def handler(ws):
     print(f"{ts()} connect {ws.remote_address} {ws.request.path}", flush=True)
-    u = Utt()
     loop = asyncio.get_event_loop()
     try:
-        async for msg in ws:
-            if not isinstance(msg, bytes) or len(msg) < 8:
-                continue
-            mtype, flags, ser, comp, payload = parse(msg)
-            if mtype == 1:                                  # config → new turn
-                u = Utt()
-            elif mtype == 2:                                # audio chunk
-                phrases = u.feed(payload)
-                if flags & 0x2:
-                    tail = u.flush()
-                    if tail: phrases.append(tail)
-                for blob in phrases:
-                    dur = len(blob) / 2 / RATE
-                    text = await loop.run_in_executor(None, transcribe, blob)
-                    if not text:
-                        print(f"{ts()}   phrase {dur:.1f}s -> (silence, skipped)", flush=True)
-                        continue
-                    cmd = gate(text)
-                    if cmd is None:
-                        print(f"{ts()}   phrase {dur:.1f}s -> {text!r}  (not a command, dropped)", flush=True)
-                        continue
-                    print(f"{ts()}   phrase {dur:.1f}s -> {text!r}  ==> COMMAND {cmd!r}", flush=True)
-                    await ws.send(server_full(cmd))
+        if USE_WAKE:
+            await handler_wake(ws, loop)
+        else:
+            await handler_gate(ws, loop)
     except Exception as e:
         print(f"{ts()}   closed: {type(e).__name__}: {e}", flush=True)
+
+async def handler_gate(ws, loop):
+    """Fallback (WAKE=0): no wake word — transcribe every phrase, gate by command vocabulary."""
+    u = Utt()
+    async for msg in ws:
+        if not isinstance(msg, bytes) or len(msg) < 8:
+            continue
+        mtype, flags, ser, comp, payload = parse(msg)
+        if mtype == 1:                                  # config → new turn
+            u = Utt()
+        elif mtype == 2:                                # audio chunk
+            phrases = u.feed(payload)
+            if flags & 0x2:
+                tail = u.flush()
+                if tail: phrases.append(tail)
+            for blob in phrases:
+                dur = len(blob) / 2 / RATE
+                text = await loop.run_in_executor(None, transcribe, blob)
+                if not text:
+                    print(f"{ts()}   phrase {dur:.1f}s -> (silence, skipped)", flush=True)
+                    continue
+                cmd = gate(text)
+                if cmd is None:
+                    print(f"{ts()}   phrase {dur:.1f}s -> {text!r}  (not a command, dropped)", flush=True)
+                    continue
+                print(f"{ts()}   phrase {dur:.1f}s -> {text!r}  ==> COMMAND {cmd!r}", flush=True)
+                await ws.send(server_full(cmd))
 
 async def main():
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(os.path.join(HERE, "cert.pem"), os.path.join(HERE, "key.pem"))
-    print(f"{ts()} SAUC shim on wss://0.0.0.0:{PORT}  (Whisper={WHISPER_MODEL}, "
-          f"VAD={VAD_AGGR}, silence={SILENCE_END_MS}ms)", flush=True)
+    mode = f"wake='{WAKE_MODEL_NAME}'@{WAKE_THRESHOLD}" if USE_WAKE else "command-vocab gate"
+    print(f"{ts()} SAUC shim on wss://0.0.0.0:{PORT}  (Whisper={WHISPER_MODEL}, {mode})", flush=True)
     async with websockets.serve(handler, "0.0.0.0", PORT, ssl=ctx, max_size=None):
         await asyncio.Future()
 
