@@ -145,3 +145,34 @@
 10:02:06 WAKE 'hey_jarvis' (score 0.99) — listening for command
 10:02:24   (phantom dropped: 'you')
 10:02:24   (false wake — no intelligible command)
+10:02:24   conn closed: 15.6s audio, peak wake score 0.99
+10:03:15 connect ('192.168.4.134', 35086) /api/v3/sauc/bigmodel_async
+10:03:15 WAKE 'hey_jarvis' (score 0.87) — listening for command
+10:03:19   ==> COMMAND 'confirmed.'
+10:03:20   conn closed: 5.5s audio, peak wake score 0.87
+10:03:47 connect ('192.168.4.134', 35092) /api/v3/sauc/bigmodel_async
+10:03:48 WAKE 'hey_jarvis' (score 0.43) — listening for command
+10:03:52   ==> COMMAND 'Thanks.'
+10:03:52 WAKE 'hey_jarvis' (score 0.47) — listening for command
+10:03:52   conn closed: 5.5s audio, peak wake score 0.47
+10:04:14 connect ('192.168.4.134', 35098) /api/v3/sauc/bigmodel_async
+10:04:30   conn closed: 15.6s audio, peak wake score 0.34
+10:04:31 connect ('192.168.4.134', 35100) /api/v3/sauc/bigmodel_async
+10:04:47   conn closed: 15.1s audio, peak wake score 0.22
+10:04:47 connect ('192.168.4.134', 35102) /api/v3/sauc/bigmodel_async
+10:05:03   conn closed: 15.1s audio, peak wake score 0.25
+10:05:05 connect ('192.168.4.134', 35104) /api/v3/sauc/bigmodel_async
+10:05:21   conn closed: 15.6s audio, peak wake score 0.33
+10:05:22 connect ('192.168.4.134', 35106) /api/v3/sauc/bigmodel_async
+10:05:37   conn closed: 15.5s audio, peak wake score 0.23
+10:05:39 connect ('192.168.4.134', 35108) /api/v3/sauc/bigmodel_async
+10:05:55   conn closed: 15.5s audio, peak wake score 0.03
+10:05:56 connect ('192.168.4.134', 35110) /api/v3/sauc/bigmodel_async
+10:06:12   conn closed: 15.6s audio, peak wake score 0.12
+10:06:12 connect ('192.168.4.134', 35112) /api/v3/sauc/bigmodel_async
+10:06:28   conn closed: 15.1s audio, peak wake score 0.07
+10:06:28 connect ('192.168.4.134', 35114) /api/v3/sauc/bigmodel_async
+10:06:44   conn closed: 15.1s audio, peak wake score 0.14
+10:06:52 connect ('192.168.4.134', 35116) /api/v3/sauc/bigmodel_async
+10:07:40   conn closed: 2.2s audio, peak wake score 0.05
+10:07:40   closed: ConnectionClosedError: sent 1011 (internal error) keepalive ping timeout; no close frame received
