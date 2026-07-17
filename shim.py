@@ -34,7 +34,10 @@ MAX_PHRASE_MS = int(os.environ.get("MAX_PHRASE_MS", "6000"))# force-cut a phrase
 # "hey_jarvis" is a stock model (no training, no cloud) chosen to not collide with Siri/Alexa.
 USE_WAKE = os.environ.get("WAKE", "1") != "0"
 WAKE_MODEL_NAME = os.environ.get("WAKE_MODEL", "hey_jarvis")
-WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.5"))
+WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.4"))  # 0.4 cleanly separates real "Hey Jarvis"
+                                                                # (~0.45-0.95) from noise (~0.1) on quiet audio
+WAKE_GAIN = float(os.environ.get("WAKE_GAIN", "5.0"))          # boost quiet hands-free audio into the
+                                                              # wake model's expected level (clipped)
 CMD_WINDOW_MS = int(os.environ.get("CMD_WINDOW_MS", "3500"))   # max audio captured after a wake
 CMD_LEAD_MS = int(os.environ.get("CMD_LEAD_MS", "1500"))       # grace for command to start after wake
 CMD_PREROLL_MS = int(os.environ.get("CMD_PREROLL_MS", "1000")) # audio kept before the wake fires (fire is
@@ -113,9 +116,9 @@ def transcribe(pcm: bytes) -> str:
     if len(pcm) < RATE * 2 * MIN_SPEECH_MS // 1000:
         return ""
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-    peak = float(np.abs(audio).max())                 # normalize quiet capture up (cap 8x) so
-    if peak > 0:                                       # Whisper can resolve a soft/distant command
-        audio = audio * min(8.0, 0.95 / peak)
+    rms_val = float(np.sqrt(np.mean(audio * audio)))  # RMS-normalize: boosts the *speech* level (not a
+    if rms_val > 1e-5:                                 # click/preroll peak) so quiet commands resolve
+        audio = np.clip(audio * min(30.0, 0.12 / rms_val), -1.0, 1.0)
     # No vad_filter here — webrtcvad already carved out the phrase; Whisper's internal
     # VAD would re-strip a short crisp command ("Sirius sit") as "no speech" → empty.
     segs, _ = MODEL.transcribe(audio, language="en", beam_size=1,
@@ -212,7 +215,9 @@ class WakeConn:
         pre_max = RATE * 2 * CMD_PREROLL_MS // 1000
         if len(self.preroll) > pre_max:
             del self.preroll[:len(self.preroll) - pre_max]
-        self.owwbuf = np.concatenate([self.owwbuf, np.frombuffer(payload, dtype=np.int16)])
+        samp = np.frombuffer(payload, dtype=np.int16).astype(np.float32) * WAKE_GAIN
+        samp = np.clip(samp, -32768, 32767).astype(np.int16)  # boost quiet audio for the wake model
+        self.owwbuf = np.concatenate([self.owwbuf, samp])
         peak = 0.0
         while len(self.owwbuf) >= OWW_FRAME:
             frame = self.owwbuf[:OWW_FRAME]; self.owwbuf = self.owwbuf[OWW_FRAME:]
@@ -250,9 +255,14 @@ class WakeConn:
 async def handler_wake(ws, loop):
     """Wake-word front-end: 'Hey Jarvis' opens a command window; Whisper runs only on that."""
     c = WakeConn()
+    diag = {"audio": 0, "peak": 0.0}
     async def finish():
         # Wake already confirmed intent — transcribe whatever we captured (pre-roll + command)
         # and decide by whether Whisper found words, not by our own VAD.
+        if os.environ.get("DUMP_CMD"):
+            import wave
+            with wave.open(os.path.join(HERE, "last_cmd.wav"), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE); w.writeframes(bytes(c.cmd))
         text = await loop.run_in_executor(None, transcribe, bytes(c.cmd))
         if text:
             print(f"{ts()}   ==> COMMAND {text!r}", flush=True)
@@ -261,24 +271,30 @@ async def handler_wake(ws, loop):
             print(f"{ts()}   (false wake — no intelligible command)", flush=True)
         c.capturing = False
         if OWW is not None: OWW.reset()
-    async for msg in ws:
-        if not isinstance(msg, bytes) or len(msg) < 8:
-            continue
-        mtype, flags, ser, comp, payload = parse(msg)
-        if mtype == 1:                                      # config → new turn
-            c = WakeConn()
-        elif mtype == 2:
-            if not c.capturing:
-                score = c.feed_wake(payload)
-                if score >= WAKE_THRESHOLD:
-                    print(f"{ts()} WAKE '{WAKE_MODEL_NAME}' (score {score:.2f}) — listening for command", flush=True)
-                    c.start_capture()
-            else:
-                done = c.feed_cmd(payload)
-                if done is None and flags & 0x2:            # robot ended the turn mid-capture
-                    done = bytes(c.cmd)
-                if done is not None:
-                    await finish()
+    try:
+        async for msg in ws:
+            if not isinstance(msg, bytes) or len(msg) < 8:
+                continue
+            mtype, flags, ser, comp, payload = parse(msg)
+            if mtype == 1:                                      # config → new turn
+                c = WakeConn()
+            elif mtype == 2:
+                diag["audio"] += len(payload)
+                if not c.capturing:
+                    score = c.feed_wake(payload)
+                    diag["peak"] = max(diag["peak"], score)
+                    if score >= WAKE_THRESHOLD:
+                        print(f"{ts()} WAKE '{WAKE_MODEL_NAME}' (score {score:.2f}) — listening for command", flush=True)
+                        c.start_capture()
+                else:
+                    done = c.feed_cmd(payload)
+                    if done is None and flags & 0x2:            # robot ended the turn mid-capture
+                        done = bytes(c.cmd)
+                    if done is not None:
+                        await finish()
+    finally:
+        secs = diag["audio"] / 2 / RATE
+        print(f"{ts()}   conn closed: {secs:.1f}s audio, peak wake score {diag['peak']:.2f}", flush=True)
 
 async def handler(ws):
     print(f"{ts()} connect {ws.remote_address} {ws.request.path}", flush=True)

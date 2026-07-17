@@ -1,7 +1,8 @@
 .venv/
+__pycache__/
+*.pyc
 cert.pem
 key.pem
 capture.bin
-capture.log
-__pycache__/
-*.pyc
+last_cmd.wav
+shim.log

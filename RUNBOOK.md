@@ -58,6 +58,43 @@ Swap `WAKE_MODEL` to another stock model, or train a custom openWakeWord model f
   phrase right after the wake word.
 - **Dog replies in Chinese** → active character locale; see sirius-notes.md ("Locale gotcha").
 
+## Hands-free (no button) — WORKS, DDS-free via touchscreen injection (2026-07-17)
+
+The AI-session trigger (`/ai_interaction/trigger`) is only reachable over the robot's ROS/DDS bus,
+which external processes can't join (unicast-only, `Failed to find a free participant index`). The
+way around it: the face touchscreen is a plain Linux input device (`cst816d_ts`, `/dev/input/event0`),
+and python-evdev is on the robot — so we inject taps/gestures directly.
+
+- **Wake from sleep** = inject `KEY_UP` (keycode 103) to event0 (replays the swipe-up).
+- **Start an AI session** = inject a tap at **(101,142)** = the AI Talk button:
+  ```python
+  from evdev import InputDevice, ecodes as e; import time
+  d=InputDevice('/dev/input/event0')
+  d.write(e.EV_ABS,e.ABS_X,101); d.write(e.EV_ABS,e.ABS_Y,142)
+  d.write(e.EV_KEY,330,1); d.write(e.EV_SYN,e.SYN_REPORT,0); time.sleep(0.05)   # 330=BTN_TOUCH
+  d.write(e.EV_KEY,330,0); d.write(e.EV_SYN,e.SYN_REPORT,0); d.close()
+  ```
+- **Keep the window open** = stretch the onset timeout via REST (no DDS):
+  ```
+  POST /api/v1/user/node-parameter  {"node_name":"ai_interaction_node",
+       "parameter_name":"onset_timeout_ms","parameter_value":300000}
+  ```
+  A single injected tap then gives a 5-minute hands-free listening window (re-inject to refresh).
+
+### Working shim config for hands-free (the robot's mic audio is QUIET — this matters)
+```
+WHISPER_MODEL=medium.en   # small.en hallucinates on the quiet mic audio; medium.en resolves it
+WAKE_GAIN=5               # boost quiet audio into openWakeWord's range (else "Hey Jarvis" scores ~0.1)
+WAKE_THRESHOLD=0.4        # real wake ~0.45-0.99, noise ~0.1 → 0.4 separates cleanly
+ENERGY_THRESH=150         # was 600 — the quiet "sit down" fell below it and got dropped as silence
+CMD_PREROLL_MS=350        # small, so the command (not the loud wake word) dominates the audio
+CMD_LEAD_MS=2500  SILENCE_MS=800
+```
+transcribe() uses RMS-normalization (boosts the speech level, not a click/preroll peak). Say the
+wake word + command as ONE continuous phrase, even volume ("Hey Jarvis sit down") — a pause after
+the name lets the capture close before the command. Proven: "Hey Jarvis sit down" → `COMMAND 'Sit down.'`
+hands-free (no touch). DUMP_CMD=1 saves last_cmd.wav for debugging capture.
+
 ## Known nice-to-haves (not built)
 - **Hands-free** (no button): keep the session open by publishing `/ai_interaction/trigger {data:true}`
   (ROS2, `ROS_DOMAIN_ID=37`, CycloneDDS). Needs the robot's exact DDS context — parked.
