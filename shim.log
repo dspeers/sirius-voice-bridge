@@ -1,18 +1,3 @@
-21:43:53 loading Whisper 'small.en'…
-21:43:53 Whisper ready.
-21:43:53 SAUC shim on wss://0.0.0.0:8443  (Whisper=small.en, VAD=3, silence=600ms)
-21:43:57 connect ('192.168.4.134', 43638) /api/v3/sauc/bigmodel_async
-21:44:08   phrase 3.2s -> "It's just a thing you really need to know very, very quickly."
-21:44:08   phrase 0.8s -> (silence, skipped)
-21:44:14   phrase 3.4s -> "So watch for use, you'll never be single again."
-21:44:15   phrase 1.7s -> 'and yellow virgin.'
-21:44:22 connect ('192.168.4.134', 43644) /api/v3/sauc/bigmodel_async
-21:44:28   phrase 3.2s -> 'as their unique place in the system.'
-21:44:34 connect ('192.168.4.134', 43650) /api/v3/sauc/bigmodel_async
-21:44:43   phrase 3.3s -> "and this is really what's going to be paid in this first month."
-21:44:44   phrase 4.0s -> 'All these words start again for the living of the Lord.'
-21:44:51 connect ('192.168.4.134', 43656) /api/v3/sauc/bigmodel_async
-21:44:54   phrase 1.7s -> (silence, skipped)
-21:45:03   phrase 6.5s -> 'All I can see is that, oh, this is 18 and B3 jump tape.  Hey, this is for you, babe.'
-21:45:21 connect ('192.168.4.134', 43662) /api/v3/sauc/bigmodel_async
-21:45:28   phrase 6.5s -> "Like it's a difference between people making money when you're making thousands of dollars."
+22:03:13 loading Whisper 'small.en'…
+22:03:14 Whisper ready.
+22:03:14 SAUC shim on wss://0.0.0.0:8443  (Whisper=small.en, VAD=3, silence=600ms)

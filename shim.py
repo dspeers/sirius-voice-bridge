@@ -9,7 +9,7 @@ moment you stop talking. We replicate that here with webrtcvad — detect the si
 transcribe just that phrase, and send a `definite` result immediately. Without this the robot never
 gets a prompt result, transcribes 15s of room noise, and Whisper hallucinates fluent nonsense.
 """
-import asyncio, ssl, struct, gzip, json, os, time
+import asyncio, ssl, struct, gzip, json, os, re, time
 import numpy as np
 import webrtcvad
 import websockets
@@ -32,6 +32,36 @@ MAX_PHRASE_MS = int(os.environ.get("MAX_PHRASE_MS", "6000"))# force-cut a phrase
 def rms(frame: bytes) -> float:
     a = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
     return float(np.sqrt(np.mean(a * a))) if len(a) else 0.0
+
+# Command gate — a bystander's chatter is dropped; only phrases that are either
+# (a) addressed to "Sirius", or (b) a *terse* phrase containing a known dog command
+# reach the brain. Terseness is what separates "Sit." from "we can sit and talk".
+WAKE_WORDS = os.environ.get("WAKE_WORDS", "sirius,serius,cyrus")  # tight — loose variants false-trigger
+GATE_ON = os.environ.get("GATE", "1") != "0"
+MAX_CMD_WORDS = int(os.environ.get("MAX_CMD_WORDS", "3"))
+_wake = [re.escape(w.strip().lower()) for w in WAKE_WORDS.split(",") if w.strip()]
+WAKE_RE = re.compile(r"\b(?:" + "|".join(_wake) + r")\b[\s,.:;!?—-]*", re.I) if _wake else None
+# Distinctive dog-command verbs only — deliberately excludes common conversational words
+# (good, up, down, here, over, play, speak) that would false-trigger on bystander chatter.
+# Multi-word commands ("come here", "roll over") are caught by their distinctive verb.
+COMMAND_WORDS = set((
+    "sit come stand lie lay shake paw stay wave dance spin roll bark "
+    "fetch heel twist crouch bow beg jump"
+).split())
+
+def gate(text: str):
+    """None → drop. Else the command text to forward to the robot's brain."""
+    if not GATE_ON:
+        return text
+    if WAKE_RE is not None:                              # (a) addressed to the dog by name
+        m = WAKE_RE.search(text)
+        if m:
+            cmd = text[m.end():].strip(" ,.?!—-").strip()
+            return cmd or text                          # bare "Sirius" → pass phrase through
+    words = re.findall(r"[a-z]+", text.lower())          # (b) terse + a known command word
+    if 0 < len(words) <= MAX_CMD_WORDS and any(w in COMMAND_WORDS for w in words):
+        return text
+    return None
 
 def ts(): return time.strftime("%H:%M:%S")
 print(f"{ts()} loading Whisper '{WHISPER_MODEL}'…", flush=True)
@@ -64,15 +94,28 @@ def transcribe(pcm: bytes) -> str:
     if len(pcm) < RATE * 2 * MIN_SPEECH_MS // 1000:
         return ""
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    peak = float(np.abs(audio).max())                 # normalize quiet capture up (cap 8x) so
+    if peak > 0:                                       # Whisper can resolve a soft/distant command
+        audio = audio * min(8.0, 0.95 / peak)
+    # No vad_filter here — webrtcvad already carved out the phrase; Whisper's internal
+    # VAD would re-strip a short crisp command ("Sirius sit") as "no speech" → empty.
     segs, _ = MODEL.transcribe(audio, language="en", beam_size=1,
-                               vad_filter=True, condition_on_previous_text=False,
-                               no_speech_threshold=0.5)
+                               vad_filter=False, condition_on_previous_text=False)
     out = []
     for s in segs:
-        if getattr(s, "no_speech_prob", 0.0) > 0.6:   # drop segments Whisper itself thinks are silence
+        if getattr(s, "no_speech_prob", 0.0) > 0.85:  # only drop segments that are almost surely silence
             continue
         out.append(s.text)
-    return " ".join(out).strip()
+    text = " ".join(out).strip()
+    # Whisper phantoms on short/noisy audio — drop so they don't masquerade as input.
+    if re.sub(r"[^a-z ]", "", text.lower()).strip() in PHANTOMS:
+        print(f"{ts()}   (phantom dropped: {text!r})", flush=True)
+        return ""
+    return text
+
+PHANTOMS = {"thank you", "thanks for watching", "thanks for watching everyone",
+            "you", "bye", "bye bye", "so", "okay", "thank you so much",
+            "please subscribe", "thank you for watching"}
 
 class Utt:
     """Per-connection VAD state — slices continuous audio into spoken phrases."""
@@ -150,8 +193,12 @@ async def handler(ws):
                     if not text:
                         print(f"{ts()}   phrase {dur:.1f}s -> (silence, skipped)", flush=True)
                         continue
-                    print(f"{ts()}   phrase {dur:.1f}s -> {text!r}", flush=True)
-                    await ws.send(server_full(text))
+                    cmd = gate(text)
+                    if cmd is None:
+                        print(f"{ts()}   phrase {dur:.1f}s -> {text!r}  (not a command, dropped)", flush=True)
+                        continue
+                    print(f"{ts()}   phrase {dur:.1f}s -> {text!r}  ==> COMMAND {cmd!r}", flush=True)
+                    await ws.send(server_full(cmd))
     except Exception as e:
         print(f"{ts()}   closed: {type(e).__name__}: {e}", flush=True)
 
