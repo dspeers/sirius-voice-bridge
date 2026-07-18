@@ -61,7 +61,7 @@ COMMANDS = {
     "bark":      (["bark", "speak", "talk"],                          [r"bark"]),
     # movement LAST so a specific action verb ("spin") wins a tie over a bare direction ("left")
     "forward":   (["forward", "go forward", "walk", "come", "come here", "here", "heel"], None),  # gait
-    "backward":  (["backward", "back up", "back", "go back", "reverse"], None),                    # gait
+    "backward":  (["backward", "backwards", "back up", "back", "go back", "reverse"], None),        # gait
     "turn_left": (["turn left", "left"],                              None),                        # gait
     "turn_right":(["turn right", "right"],                            None),                        # gait
     "stop":      (["stop", "stay", "freeze", "halt"],                 None),   # stop movement/action
@@ -70,15 +70,26 @@ COMMANDS = {
 VOCAB = list(COMMANDS.keys())
 THINK_PATTERNS = [r"ponder", r"confused", r"think"]   # a "thinking" gesture for the fallback
 
+MOVE_CMDS = {"forward", "backward", "turn_left", "turn_right", "stop"}
+
 def match_command(text: str):
-    """Return a canonical command if the transcript clearly names one, else None."""
+    """Return a canonical command if the transcript clearly names one, else None.
+    A specific action verb (spin/sit/dance/…) beats a bare direction (left/right) even if the
+    direction word is longer — "spin to the right" is a spin, not a turn. Within the same
+    category, the longer keyword wins ("sit down" over "down", "turn left" over "left")."""
     t = " " + re.sub(r"[^a-z ]", " ", text.lower()) + " "
-    # longest keyword first so "sit down" wins over "down"
-    best = None
+    best = None   # (cmd, kw_len, is_move)
     for cmd, (kws, _) in COMMANDS.items():
+        is_move = cmd in MOVE_CMDS
         for kw in kws:
-            if f" {kw} " in t and (best is None or len(kw) > best[1]):
-                best = (cmd, len(kw))
+            if f" {kw} " not in t:
+                continue
+            if best is None:
+                best = (cmd, len(kw), is_move)
+            elif best[2] and not is_move:                 # action beats move
+                best = (cmd, len(kw), is_move)
+            elif best[2] == is_move and len(kw) > best[1]:  # same category → longer wins
+                best = (cmd, len(kw), is_move)
     return best[0] if best else None
 
 # ---- robot REST client -----------------------------------------------------------------------
@@ -251,12 +262,15 @@ def main():
             if not text:
                 continue
 
-            cmd = match_command(text)
+            # a conjunction implies multiple actions → let the LLM order+chain them;
+            # otherwise take the instant table path.
+            compound = bool(re.search(r"\b(and|then|also|after)\b", text.lower()))
+            cmd = None if compound else match_command(text)
             if cmd:
                 log(f"  → command '{cmd}' (table)")
                 robot.perform(cmd)
                 continue
-            # fallback: thinking gesture + constrained LLM → actions
+            # fallback: thinking gesture + constrained LLM → actions (handles compounds)
             if not LLM_ENABLE:
                 log("  (no table match; LLM fallback disabled)"); continue
             log("  → no table match; pondering + asking LLM…")
