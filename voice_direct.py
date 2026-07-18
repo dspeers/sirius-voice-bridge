@@ -27,6 +27,8 @@ WHISPER_MODEL  = os.environ.get("WHISPER_MODEL", "small.en")  # Mac mic is clean
 WAKE_MODEL     = os.environ.get("WAKE_MODEL", "hey_jarvis")
 WAKE_THRESHOLD = float(os.environ.get("WAKE_THRESHOLD", "0.5"))
 TORQUE     = int(os.environ.get("TORQUE", "2047"))            # 2047 = full; matches the panel's default
+DRIVE_SPEED = float(os.environ.get("DRIVE_SPEED", "0.35"))   # gait speed 0.05-0.5 (higher = faster)
+DRIVE_MS    = int(os.environ.get("DRIVE_MS", "1300"))        # how long a movement command drives, then stop
 MIC_DEVICE = os.environ.get("MIC_DEVICE")                     # sounddevice device name/index, or None=default
 LLM_ENABLE = os.environ.get("LLM_ENABLE", "1") != "0"
 LLM_URL    = os.environ.get("LLM_URL", "http://localhost:11434/v1")   # local Ollama (sirius-llm)
@@ -37,6 +39,8 @@ FRAME_BYTES = RATE * FRAME_MS // 1000 * 2       # 640B = 20ms
 OWW_FRAME   = 1280                              # 80ms — oww native chunk
 SILENCE_END_MS = int(os.environ.get("SILENCE_MS", "700"))
 MAX_CMD_MS     = int(os.environ.get("MAX_CMD_MS", "4000"))
+CMD_PREROLL_MS = int(os.environ.get("CMD_PREROLL_MS", "900"))  # audio kept before the wake fires (the
+                                                               # wake triggers ~400ms late; keeps command onset)
 VAD_AGGR       = int(os.environ.get("VAD_AGGR", "2"))
 
 def ts(): return time.strftime("%H:%M:%S")
@@ -50,12 +54,16 @@ COMMANDS = {
     "sit":       (["sit", "sit down", "take a seat", "park it"],      [r"^sit_default.*(idle|brief)"]),
     "stand":     (["stand", "stand up", "get up", "up"],              [r"^stand_default.*(idle|returnPosition)"]),
     "lie_down":  (["lie down", "lay down", "lie", "down", "lay"],     [r"^lie_default.*(idle|brief)"]),
-    "come":      (["come", "come here", "here", "heel"],              None),   # gait, not an action file
-    "shake":     (["shake", "paw", "give paw", "shake hands"],        [r"(shake|paw|hand)"]),
-    "spin":      (["spin", "turn around", "twirl"],                   [r"(spin|turn|twist)"]),
-    "roll_over": (["roll over", "roll", "rollover"],                  [r"roll"]),
-    "wave":      (["wave", "say hi", "say hello", "hello"],           [r"(wave|hi|hello|greet)"]),
+    "shake":     (["shake", "paw", "give paw", "shake hands"],        [r"paw", r"shake"]),
+    "spin":      (["spin", "spin around", "twirl"],                   [r"spin"]),   # gait_*_spin_jump
+    "dance":     (["dance", "do a dance", "boogie"],                  [r"stand_default_dance.*brief"]),
+    "wave":      (["wave", "say hi", "say hello", "hello", "greet"],  [r"greet", r"hello", r"wave"]),
     "bark":      (["bark", "speak", "talk"],                          [r"bark"]),
+    # movement LAST so a specific action verb ("spin") wins a tie over a bare direction ("left")
+    "forward":   (["forward", "go forward", "walk", "come", "come here", "here", "heel"], None),  # gait
+    "backward":  (["backward", "back up", "back", "go back", "reverse"], None),                    # gait
+    "turn_left": (["turn left", "left"],                              None),                        # gait
+    "turn_right":(["turn right", "right"],                            None),                        # gait
     "stop":      (["stop", "stay", "freeze", "halt"],                 None),   # stop movement/action
 }
 # words that let the LLM fallback know something is a command vocabulary (for the constrained prompt)
@@ -126,14 +134,19 @@ class Robot:
     def gait_stop(self):
         self._req("gait/stop", "POST", {})
 
-    def come(self):
-        # walk forward briefly toward the speaker; tune distance/steps on device
-        self._req("gait/move/forward", "POST", {"steps": 3})
+    GAIT = {"forward": "gait/move/forward", "backward": "gait/move/backward",
+            "turn_left": "gait/move/turn-left", "turn_right": "gait/move/turn-right"}
+
+    def drive(self, endpoint):
+        # the panel drives by re-POSTing {speed} every 350ms while held, then gait/stop
+        for _ in range(max(1, DRIVE_MS // 350)):
+            self._req(endpoint, "POST", {"speed": DRIVE_SPEED}); time.sleep(0.35)
+        self.gait_stop()
 
     def perform(self, cmd):
         """Execute a canonical command via the right mechanism."""
-        if cmd == "come":   return self.come()
-        if cmd == "stop":   return self.gait_stop()
+        if cmd == "stop":     return self.gait_stop()
+        if cmd in self.GAIT:  return self.drive(self.GAIT[cmd])
         self.play(self.resolved.get(cmd))
 
     def ponder(self):
@@ -191,6 +204,7 @@ def main():
 
     log(f"listening on mic (device={MIC_DEVICE or 'default'}) — say \"Hey {WAKE_MODEL.split('_')[-1].title()}, <command>\"")
     owwbuf = np.zeros(0, dtype=np.int16)
+    preroll = bytearray(); pre_max = RATE * 2 * CMD_PREROLL_MS // 1000
 
     def read_block(stream, n):
         data, _ = stream.read(n)
@@ -199,7 +213,11 @@ def main():
     with sd.RawInputStream(samplerate=RATE, blocksize=OWW_FRAME, dtype="int16", channels=1,
                            device=MIC_DEVICE) as stream:
         while True:
-            owwbuf = np.concatenate([owwbuf, read_block(stream, OWW_FRAME)])
+            blk = read_block(stream, OWW_FRAME)
+            preroll += blk.tobytes()                       # rolling pre-roll of recent audio
+            if len(preroll) > pre_max:
+                del preroll[:len(preroll) - pre_max]
+            owwbuf = np.concatenate([owwbuf, blk])
             fired = False
             while len(owwbuf) >= OWW_FRAME:
                 frame = owwbuf[:OWW_FRAME]; owwbuf = owwbuf[OWW_FRAME:]
@@ -210,8 +228,10 @@ def main():
 
             log(f"WAKE — capturing command…")
             oww.reset(); owwbuf = np.zeros(0, dtype=np.int16)
-            # capture until ~SILENCE_END_MS of trailing silence (after speech) or MAX_CMD_MS
-            pcm = bytearray(); had_speech = False; silence = 0; elapsed = 0
+            # seed with pre-roll so the late wake-fire doesn't clip the command onset ("sit"),
+            # then keep capturing until ~SILENCE_END_MS of trailing silence or MAX_CMD_MS.
+            pcm = bytearray(preroll); preroll = bytearray()
+            had_speech = False; silence = 0; elapsed = 0
             leftover = bytearray()
             while elapsed < MAX_CMD_MS:
                 block = read_block(stream, OWW_FRAME).tobytes()
