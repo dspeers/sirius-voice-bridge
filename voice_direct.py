@@ -49,6 +49,12 @@ MAX_UTTER_WORDS = int(os.environ.get("MAX_UTTER_WORDS", "8"))  # real commands a
 def ts(): return time.strftime("%H:%M:%S")
 def log(m): print(f"{ts()} {m}", flush=True)
 
+# Structured event log (JSONL) for the web-UI monitor to tail; additive, alongside the human log.
+HERE = os.path.dirname(os.path.abspath(__file__))
+EVENTS_PATH = os.environ.get("EVENTS_PATH", os.path.join(HERE, "voice_direct.events.jsonl"))
+_ev = open(EVENTS_PATH, "a", buffering=1)
+def event(kind, **f): _ev.write(json.dumps({"t": time.time(), "kind": kind, **f}) + "\n")
+
 # ---- command vocabulary ----------------------------------------------------------------------
 # canonical command -> (keywords that trigger it, regex(es) to find the action .avi in /action/list).
 # The action-file guesses below are resolved/verified against the LIVE action list at startup, so
@@ -217,6 +223,8 @@ def main():
     robot.resolve()
 
     log(f"listening on mic (device={MIC_DEVICE or 'default'}) — say \"Hey {WAKE_MODEL.split('_')[-1].title()}, <command>\"")
+    event("ready", whisper=WHISPER_MODEL, wake=WAKE_MODEL, robot=ROBOT, llm=LLM_ENABLE,
+          mic=(MIC_DEVICE or "default"), actions={c: robot.resolved.get(c) for c in VOCAB})
     owwbuf = np.zeros(0, dtype=np.int16)
     preroll = bytearray(); pre_max = RATE * 2 * CMD_PREROLL_MS // 1000
 
@@ -241,6 +249,7 @@ def main():
                 continue
 
             log(f"WAKE — capturing command…")
+            event("wake")
             oww.reset(); owwbuf = np.zeros(0, dtype=np.int16)
             # seed with pre-roll so the late wake-fire doesn't clip the command onset ("sit"),
             # then keep capturing until ~SILENCE_END_MS of trailing silence or MAX_CMD_MS.
@@ -262,10 +271,12 @@ def main():
                     break
             text = transcribe(whisper, bytes(pcm))
             log(f"  heard: {text!r}")
+            event("heard", text=text)
             if not text:
                 continue
             if len(re.findall(r"[a-z]+", text.lower())) > MAX_UTTER_WORDS:
                 log(f"  (ignored — too long, likely conversation not a command)")
+                event("ignored", text=text, reason="too_long")
                 continue
 
             # a conjunction implies multiple actions → let the LLM order+chain them;
@@ -274,6 +285,7 @@ def main():
             cmd = None if compound else match_command(text)
             if cmd:
                 log(f"  → command '{cmd}' (table)")
+                event("command", text=text, commands=[cmd], via="table")
                 robot.perform(cmd)
                 continue
             # fallback: thinking gesture + constrained LLM → actions (handles compounds)
@@ -284,10 +296,12 @@ def main():
             acts = llm_map(text)
             if acts:
                 log(f"  ← LLM mapped to {acts}")
+                event("command", text=text, commands=acts, via="llm")
                 for a in acts:
                     robot.perform(a); time.sleep(0.4)
             else:
                 log("  ← LLM: not a command")
+                event("no_command", text=text)
                 robot.play(robot._find([r"confused"]))   # small confused gesture if one exists
 
 if __name__ == "__main__":
