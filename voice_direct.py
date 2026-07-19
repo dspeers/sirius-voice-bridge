@@ -42,6 +42,9 @@ MAX_CMD_MS     = int(os.environ.get("MAX_CMD_MS", "4000"))
 CMD_PREROLL_MS = int(os.environ.get("CMD_PREROLL_MS", "900"))  # audio kept before the wake fires (the
                                                                # wake triggers ~400ms late; keeps command onset)
 VAD_AGGR       = int(os.environ.get("VAD_AGGR", "2"))
+MAX_UTTER_WORDS = int(os.environ.get("MAX_UTTER_WORDS", "8"))  # real commands are terse; ignore long
+                                                              # rambles (a bystander conversation that
+                                                              # false-tripped the wake word)
 
 def ts(): return time.strftime("%H:%M:%S")
 def log(m): print(f"{ts()} {m}", flush=True)
@@ -52,10 +55,10 @@ def log(m): print(f"{ts()} {m}", flush=True)
 # exact vendor names don't have to be hard-coded — we pick the best match from what the robot reports.
 COMMANDS = {
     "sit":       (["sit", "sit down", "take a seat", "park it"],      [r"^sit_default.*(idle|brief)"]),
-    "stand":     (["stand", "stand up", "get up", "up"],              [r"^stand_default.*(idle|returnPosition)"]),
+    "stand":     (["stand", "stand up", "get up", "stand back up"],   [r"^stand_default.*(idle|returnPosition)"]),
     "lie_down":  (["lie down", "lay down", "lie", "down", "lay"],     [r"^lie_default.*(idle|brief)"]),
     "shake":     (["shake", "paw", "give paw", "shake hands"],        [r"paw", r"shake"]),
-    "spin":      (["spin", "spin around", "twirl"],                   [r"spin"]),   # gait_*_spin_jump
+    "spin":      (["spin", "spin around", "twirl", "turn around", "turnaround", "about face"], [r"spin"]),  # gait_*_spin_jump
     "dance":     (["dance", "do a dance", "boogie"],                  [r"stand_default_dance.*brief"]),
     "wave":      (["wave", "say hi", "say hello", "hello", "greet"],  [r"greet", r"hello", r"wave"]),
     "bark":      (["bark", "speak", "talk"],                          [r"bark"]),
@@ -260,6 +263,9 @@ def main():
             text = transcribe(whisper, bytes(pcm))
             log(f"  heard: {text!r}")
             if not text:
+                continue
+            if len(re.findall(r"[a-z]+", text.lower())) > MAX_UTTER_WORDS:
+                log(f"  (ignored — too long, likely conversation not a command)")
                 continue
 
             # a conjunction implies multiple actions → let the LLM order+chain them;
