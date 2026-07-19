@@ -42,4 +42,14 @@ echo "[..] installing Python deps…"
 ./.venv/bin/pip install -q sounddevice openwakeword onnxruntime faster-whisper webrtcvad-wheels numpy
 echo "[ok] Python deps installed"
 
+# openWakeWord ships WITHOUT model files — they must be fetched, or Model() fails NO_SUCHFILE on first run.
+echo "[..] downloading wake-word models…"
+./.venv/bin/python -c "import openwakeword.utils as u; u.download_models()"
+echo "[ok] wake-word models downloaded"
+
+# Pre-fetch the Whisper model so the first run isn't slow and readiness shows green.
+echo "[..] downloading Whisper model (${WHISPER_MODEL:-small.en})…"
+./.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL:-small.en}', device='cpu', compute_type='int8')"
+echo "[ok] Whisper model ready"
+
 echo "== setup complete — recheck readiness in the panel =="
