@@ -78,6 +78,7 @@ COMMANDS = {
 # words that let the LLM fallback know something is a command vocabulary (for the constrained prompt)
 VOCAB = list(COMMANDS.keys())
 THINK_PATTERNS = [r"ponder", r"confused", r"think"]   # a "thinking" gesture for the fallback
+DENY_PATTERNS = [r"deny", r"doubt", r"confused"]      # a "no / didn't get that" gesture (head-shake)
 
 MOVE_CMDS = {"forward", "backward", "turn_left", "turn_right", "stop"}
 
@@ -142,6 +143,7 @@ class Robot:
         for cmd, (_, pats) in COMMANDS.items():
             self.resolved[cmd] = self._find(pats)     # None for gait-based (come/stop) or unmatched
         self.think = self._find(THINK_PATTERNS)
+        self.deny = self._find(DENY_PATTERNS)
         log(f"  resolved actions: " + ", ".join(f"{c}->{self.resolved[c]}" for c in VOCAB))
         if not self.think:
             log("  (no 'ponder' gesture found for thinking fallback)")
@@ -302,7 +304,7 @@ def main():
             else:
                 log("  ← LLM: not a command")
                 event("no_command", text=text)
-                robot.play(robot._find([r"confused"]))   # small confused gesture if one exists
+                robot.play(robot.deny)                   # head-shake "no" — didn't understand
 
 if __name__ == "__main__":
     try: main()
